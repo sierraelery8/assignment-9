@@ -10,8 +10,9 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 
+// ------------------------------
 // JWT AUTH MIDDLEWARE
-
+// ------------------------------
 function requireAuth(req, res, next) {
     const authHeader = req.headers.authorization;
 
@@ -57,7 +58,9 @@ async function testConnection() {
 
 testConnection();
 
+// ------------------------------
 // AUTH ROUTES
+// ------------------------------
 
 // POST /api/register - Register new user
 app.post('/api/register', async (req, res) => {
@@ -136,7 +139,14 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// POST /api/logout - JWT logout (stateless)
+app.post('/api/logout', (req, res) => {
+    res.json({ message: 'Logout successful (JWT does not require server logout)' });
+});
+
+// ------------------------------
 // USER ROUTES
+// ------------------------------
 
 // GET /api/users/profile - Get current user profile
 app.get('/api/users/profile', requireAuth, async (req, res) => {
@@ -170,7 +180,9 @@ app.get('/api/users', requireAuth, requireRole('Admin'), async (req, res) => {
     }
 });
 
+// ------------------------------
 // PROJECT ROUTES
+// ------------------------------
 
 // GET /api/projects - Get all projects
 app.get('/api/projects', requireAuth, async (req, res) => {
@@ -285,7 +297,9 @@ app.delete('/api/projects/:id', requireAuth, requireRole('Admin'), async (req, r
     }
 });
 
+// ------------------------------
 // TASK ROUTES
+// ------------------------------
 
 // GET /api/projects/:id/tasks - Get tasks for a project
 app.get('/api/projects/:id/tasks', requireAuth, async (req, res) => {
@@ -369,7 +383,9 @@ app.delete('/api/tasks/:id', requireAuth, requireRole('Admin'), async (req, res)
     }
 });
 
+// ------------------------------
 // START SERVER
+// ------------------------------
 app.listen(PORT, () => {
     console.log(`Server running on port http://localhost:${PORT}`);
 });
