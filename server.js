@@ -27,7 +27,8 @@ function requireAuth(req, res, next) {
         req.user = {
             id: req.session.userId,
             name: req.session.userName,
-            email: req.session.userEmail
+            email: req.session.userEmail,
+            role: req.session.userRole  
         };
         next();
     } else {
@@ -71,21 +72,17 @@ app.post('/api/register', async (req, res) => {
     try {
         const { name, email, password } = req.body;
         
-        // Check if user exists
         const existingUser = await User.findOne({ where: { email } });
         if (existingUser) {
             return res.status(400).json({ error: 'User with this email already exists' });
         }
         
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        // Create user
         const newUser = await User.create({
             name,
             email,
             password: hashedPassword
-            // TODO: Add role field
         });
         
         res.status(201).json({
@@ -103,7 +100,7 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
-// POST /api/login - User login (TODO: Replace with JWT)
+// POST /api/login - User login
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -118,8 +115,7 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        // Create session (TODO: Replace with JWT)
-        
+        // Create session
         req.session.userId = user.id;
         req.session.userName = user.name;
         req.session.userEmail = user.email;
@@ -130,7 +126,8 @@ app.post('/api/login', async (req, res) => {
             user: {
                 id: user.id,
                 name: user.name,
-                email: user.email
+                email: user.email,
+                role: user.role
             }
         });
         
@@ -156,7 +153,7 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/users/profile', requireAuth, async (req, res) => {
     try {
         const user = await User.findByPk(req.user.id, {
-            attributes: ['id', 'name', 'email'] // Don't return password
+            attributes: ['id', 'name', 'email']
         });
         
         if (!user) {
@@ -170,11 +167,11 @@ app.get('/api/users/profile', requireAuth, async (req, res) => {
     }
 });
 
-// GET /api/users - Get all users (TODO: Admin only)
+// GET /api/users - Admin only
 app.get('/api/users', requireAuth, requireRole('Admin'), async (req, res) => {
     try {
         const users = await User.findAll({
-            attributes: ['id', 'name', 'email'] // Don't return passwords
+            attributes: ['id', 'name', 'email']
         });
         
         res.json(users);
@@ -186,8 +183,8 @@ app.get('/api/users', requireAuth, requireRole('Admin'), async (req, res) => {
 
 // PROJECT ROUTES
 
-// GET /api/projects - Get projects
-app.post('/api/projects', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
+// GET /api/projects - Get all projects
+app.get('/api/projects', requireAuth, async (req, res) => {
     try {
         const projects = await Project.findAll({
             include: [
@@ -207,7 +204,7 @@ app.post('/api/projects', requireAuth, requireRole('Manager', 'Admin'), async (r
 });
 
 // GET /api/projects/:id - Get single project
-app.put('/api/projects/:id', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
+app.get('/api/projects/:id', requireAuth, async (req, res) => {
     try {
         const project = await Project.findByPk(req.params.id, {
             include: [
@@ -240,8 +237,8 @@ app.put('/api/projects/:id', requireAuth, requireRole('Manager', 'Admin'), async
     }
 });
 
-// POST /api/projects - Create new project (TODO: Manager+ only)
-app.post('/api/projects', requireAuth, async (req, res) => {
+// POST /api/projects - Create new project (Manager + Admin)
+app.post('/api/projects', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
     try {
         const { name, description, status = 'active' } = req.body;
         
@@ -259,8 +256,8 @@ app.post('/api/projects', requireAuth, async (req, res) => {
     }
 });
 
-// PUT /api/projects/:id - Update project (TODO: Manager+ only)
-app.put('/api/projects/:id', requireAuth, async (req, res) => {
+// PUT /api/projects/:id - Update project (Manager + Admin)
+app.put('/api/projects/:id', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
     try {
         const { name, description, status } = req.body;
         
@@ -281,7 +278,7 @@ app.put('/api/projects/:id', requireAuth, async (req, res) => {
     }
 });
 
-// DELETE /api/projects/:id - Delete project (TODO: Admin only)
+// DELETE /api/projects/:id - Delete project (Admin only)
 app.delete('/api/projects/:id', requireAuth, requireRole('Admin'), async (req, res) => {
     try {
         const deletedRowsCount = await Project.destroy({
@@ -322,7 +319,7 @@ app.get('/api/projects/:id/tasks', requireAuth, async (req, res) => {
     }
 });
 
-// POST /api/projects/:id/tasks - Create task (TODO: Manager+ only)
+// POST /api/projects/:id/tasks - Create task (Manager + Admin)
 app.post('/api/projects/:id/tasks', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
     try {
         const { title, description, assignedUserId, priority = 'medium' } = req.body;
@@ -365,7 +362,7 @@ app.put('/api/tasks/:id', requireAuth, async (req, res) => {
     }
 });
 
-// DELETE /api/tasks/:id - Delete task (TODO: Manager+ only)
+// DELETE /api/tasks/:id - Delete task (Admin only)
 app.delete('/api/tasks/:id', requireAuth, requireRole('Admin'), async (req, res) => {
     try {
         const deletedRowsCount = await Task.destroy({
