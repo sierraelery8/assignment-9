@@ -31,22 +31,36 @@ function requireAuth(req, res, next) {
     }
 }
 
-// Role-based access control middleware
-function requireRole(...allowedRoles) {
-    return (req, res, next) => {
-        if (!req.user || !req.user.role) {
-            return res.status(401).json({ error: 'Authentication required' });
-        }
+// ------------------------------
+// ROLE-BASED AUTHORIZATION
+// ------------------------------
+function requireManager(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
 
-        if (!allowedRoles.includes(req.user.role)) {
-            return res.status(403).json({ error: 'Access denied' });
-        }
+    if (req.user.role !== 'manager' && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Manager or Admin role required' });
+    }
 
-        next();
-    };
+    next();
 }
 
-// Test database connection
+function requireAdmin(req, res, next) {
+    if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Admin role required' });
+    }
+
+    next();
+}
+
+// ------------------------------
+// TEST DB CONNECTION
+// ------------------------------
 async function testConnection() {
     try {
         await db.authenticate();
@@ -62,10 +76,10 @@ testConnection();
 // AUTH ROUTES
 // ------------------------------
 
-// POST /api/register - Register new user
+// REGISTER
 app.post('/api/register', async (req, res) => {
     try {
-        const { name, email, password } = req.body;
+        const { name, email, password, role = 'employee' } = req.body;
 
         const existingUser = await User.findOne({ where: { email } });
         if (existingUser) {
@@ -77,15 +91,29 @@ app.post('/api/register', async (req, res) => {
         const newUser = await User.create({
             name,
             email,
-            password: hashedPassword
+            password: hashedPassword,
+            role
         });
+
+        const token = jwt.sign(
+            {
+                id: newUser.id,
+                name: newUser.name,
+                email: newUser.email,
+                role: newUser.role
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES_IN }
+        );
 
         res.status(201).json({
             message: 'User registered successfully',
+            token,
             user: {
                 id: newUser.id,
                 name: newUser.name,
-                email: newUser.email
+                email: newUser.email,
+                role: newUser.role
             }
         });
 
@@ -95,7 +123,7 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
-// POST /api/login - User login (JWT)
+// LOGIN
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -110,7 +138,6 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        // Generate JWT
         const token = jwt.sign(
             {
                 id: user.id,
@@ -139,7 +166,7 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// POST /api/logout - JWT logout (stateless)
+// LOGOUT (JWT is stateless)
 app.post('/api/logout', (req, res) => {
     res.json({ message: 'Logout successful (JWT does not require server logout)' });
 });
@@ -147,12 +174,10 @@ app.post('/api/logout', (req, res) => {
 // ------------------------------
 // USER ROUTES
 // ------------------------------
-
-// GET /api/users/profile - Get current user profile
 app.get('/api/users/profile', requireAuth, async (req, res) => {
     try {
         const user = await User.findByPk(req.user.id, {
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email', 'role']
         });
 
         if (!user) {
@@ -166,11 +191,11 @@ app.get('/api/users/profile', requireAuth, async (req, res) => {
     }
 });
 
-// GET /api/users - Admin only
-app.get('/api/users', requireAuth, requireRole('Admin'), async (req, res) => {
+// ADMIN: VIEW ALL USERS
+app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
     try {
         const users = await User.findAll({
-            attributes: ['id', 'name', 'email']
+            attributes: ['id', 'name', 'email', 'role']
         });
 
         res.json(users);
@@ -184,7 +209,7 @@ app.get('/api/users', requireAuth, requireRole('Admin'), async (req, res) => {
 // PROJECT ROUTES
 // ------------------------------
 
-// GET /api/projects - Get all projects
+// GET ALL PROJECTS
 app.get('/api/projects', requireAuth, async (req, res) => {
     try {
         const projects = await Project.findAll({
@@ -204,7 +229,7 @@ app.get('/api/projects', requireAuth, async (req, res) => {
     }
 });
 
-// GET /api/projects/:id - Get single project
+// GET SINGLE PROJECT
 app.get('/api/projects/:id', requireAuth, async (req, res) => {
     try {
         const project = await Project.findByPk(req.params.id, {
@@ -238,8 +263,8 @@ app.get('/api/projects/:id', requireAuth, async (req, res) => {
     }
 });
 
-// POST /api/projects - Create new project (Manager + Admin)
-app.post('/api/projects', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
+// MANAGER: CREATE PROJECT
+app.post('/api/projects', requireAuth, requireManager, async (req, res) => {
     try {
         const { name, description, status = 'active' } = req.body;
 
@@ -257,8 +282,8 @@ app.post('/api/projects', requireAuth, requireRole('Manager', 'Admin'), async (r
     }
 });
 
-// PUT /api/projects/:id - Update project (Manager + Admin)
-app.put('/api/projects/:id', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
+// MANAGER: UPDATE PROJECT
+app.put('/api/projects/:id', requireAuth, requireManager, async (req, res) => {
     try {
         const { name, description, status } = req.body;
 
@@ -279,8 +304,8 @@ app.put('/api/projects/:id', requireAuth, requireRole('Manager', 'Admin'), async
     }
 });
 
-// DELETE /api/projects/:id - Delete project (Admin only)
-app.delete('/api/projects/:id', requireAuth, requireRole('Admin'), async (req, res) => {
+// ADMIN: DELETE PROJECT
+app.delete('/api/projects/:id', requireAuth, requireAdmin, async (req, res) => {
     try {
         const deletedRowsCount = await Project.destroy({
             where: { id: req.params.id }
@@ -301,7 +326,7 @@ app.delete('/api/projects/:id', requireAuth, requireRole('Admin'), async (req, r
 // TASK ROUTES
 // ------------------------------
 
-// GET /api/projects/:id/tasks - Get tasks for a project
+// GET TASKS FOR A PROJECT
 app.get('/api/projects/:id/tasks', requireAuth, async (req, res) => {
     try {
         const tasks = await Task.findAll({
@@ -322,8 +347,8 @@ app.get('/api/projects/:id/tasks', requireAuth, async (req, res) => {
     }
 });
 
-// POST /api/projects/:id/tasks - Create task (Manager + Admin)
-app.post('/api/projects/:id/tasks', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
+// MANAGER: CREATE TASK
+app.post('/api/projects/:id/tasks', requireAuth, requireManager, async (req, res) => {
     try {
         const { title, description, assignedUserId, priority = 'medium' } = req.body;
 
@@ -343,30 +368,8 @@ app.post('/api/projects/:id/tasks', requireAuth, requireRole('Manager', 'Admin')
     }
 });
 
-// PUT /api/tasks/:id - Update task
-app.put('/api/tasks/:id', requireAuth, async (req, res) => {
-    try {
-        const { title, description, status, priority } = req.body;
-
-        const [updatedRowsCount] = await Task.update(
-            { title, description, status, priority },
-            { where: { id: req.params.id } }
-        );
-
-        if (updatedRowsCount === 0) {
-            return res.status(404).json({ error: 'Task not found' });
-        }
-
-        const updatedTask = await Task.findByPk(req.params.id);
-        res.json(updatedTask);
-    } catch (error) {
-        console.error('Error updating task:', error);
-        res.status(500).json({ error: 'Failed to update task' });
-    }
-});
-
-// DELETE /api/tasks/:id - Delete task (Admin only)
-app.delete('/api/tasks/:id', requireAuth, requireRole('Admin'), async (req, res) => {
+// MANAGER: DELETE TASK
+app.delete('/api/tasks/:id', requireAuth, requireManager, async (req, res) => {
     try {
         const deletedRowsCount = await Task.destroy({
             where: { id: req.params.id }
