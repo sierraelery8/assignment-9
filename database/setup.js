@@ -28,7 +28,13 @@ const User = db.define('User', {
         type: DataTypes.STRING,
         allowNull: false
     },
-    // TODO: Add role field (employee, manager, admin)
+
+    role: {
+  type: DataTypes.STRING,
+  allowNull: false,
+  defaultValue: 'Employee'
+}
+
 });
 
 // Project Model
