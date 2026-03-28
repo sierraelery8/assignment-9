@@ -1,7 +1,6 @@
-const jwt = require('jsonwebtoken');
 const express = require('express');
-const session = require('express-session');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { db, User, Project, Task } = require('./database/setup');
 require('dotenv').config();
 
@@ -11,42 +10,34 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 
-// Session middleware (TODO: Replace with JWT)
-app.use(session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: { 
-        secure: false,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
-}));
+// JWT AUTH MIDDLEWARE
 
-// TODO: Create JWT middleware to replace session auth
 function requireAuth(req, res, next) {
-    if (req.session && req.session.userId) {
-        req.user = {
-            id: req.session.userId,
-            name: req.session.userName,
-            email: req.session.userEmail,
-            role: req.session.userRole  
-        };
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decoded; // contains id, name, email, role
         next();
-    } else {
-        res.status(401).json({ 
-            error: 'Authentication required. Please log in.' 
-        });
+    } catch (error) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
     }
 }
 
 // Role-based access control middleware
 function requireRole(...allowedRoles) {
     return (req, res, next) => {
-        if (!req.session || !req.session.userRole) {
+        if (!req.user || !req.user.role) {
             return res.status(401).json({ error: 'Authentication required' });
         }
 
-        if (!allowedRoles.includes(req.session.userRole)) {
+        if (!allowedRoles.includes(req.user.role)) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
@@ -66,26 +57,26 @@ async function testConnection() {
 
 testConnection();
 
-// AUTHENTICATION ROUTES
+// AUTH ROUTES
 
 // POST /api/register - Register new user
 app.post('/api/register', async (req, res) => {
     try {
         const { name, email, password } = req.body;
-        
+
         const existingUser = await User.findOne({ where: { email } });
         if (existingUser) {
             return res.status(400).json({ error: 'User with this email already exists' });
         }
-        
+
         const hashedPassword = await bcrypt.hash(password, 10);
-        
+
         const newUser = await User.create({
             name,
             email,
             password: hashedPassword
         });
-        
+
         res.status(201).json({
             message: 'User registered successfully',
             user: {
@@ -94,36 +85,43 @@ app.post('/api/register', async (req, res) => {
                 email: newUser.email
             }
         });
-        
+
     } catch (error) {
         console.error('Error registering user:', error);
         res.status(500).json({ error: 'Failed to register user' });
     }
 });
 
-// POST /api/login - User login
+// POST /api/login - User login (JWT)
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        
+
         const user = await User.findOne({ where: { email } });
         if (!user) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
-        
+
         const isValidPassword = await bcrypt.compare(password, user.password);
         if (!isValidPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        // Create session
-        req.session.userId = user.id;
-        req.session.userName = user.name;
-        req.session.userEmail = user.email;
-        req.session.userRole = user.role;
-        
+        // Generate JWT
+        const token = jwt.sign(
+            {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: process.env.JWT_EXPIRES_IN }
+        );
+
         res.json({
             message: 'Login successful',
+            token,
             user: {
                 id: user.id,
                 name: user.name,
@@ -131,21 +129,11 @@ app.post('/api/login', async (req, res) => {
                 role: user.role
             }
         });
-        
+
     } catch (error) {
         console.error('Error logging in user:', error);
         res.status(500).json({ error: 'Failed to login' });
     }
-});
-
-// POST /api/logout - User logout
-app.post('/api/logout', (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            return res.status(500).json({ error: 'Failed to logout' });
-        }
-        res.json({ message: 'Logout successful' });
-    });
 });
 
 // USER ROUTES
@@ -156,11 +144,11 @@ app.get('/api/users/profile', requireAuth, async (req, res) => {
         const user = await User.findByPk(req.user.id, {
             attributes: ['id', 'name', 'email']
         });
-        
+
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-        
+
         res.json(user);
     } catch (error) {
         console.error('Error fetching user profile:', error);
@@ -174,7 +162,7 @@ app.get('/api/users', requireAuth, requireRole('Admin'), async (req, res) => {
         const users = await User.findAll({
             attributes: ['id', 'name', 'email']
         });
-        
+
         res.json(users);
     } catch (error) {
         console.error('Error fetching users:', error);
@@ -196,7 +184,7 @@ app.get('/api/projects', requireAuth, async (req, res) => {
                 }
             ]
         });
-        
+
         res.json(projects);
     } catch (error) {
         console.error('Error fetching projects:', error);
@@ -226,11 +214,11 @@ app.get('/api/projects/:id', requireAuth, async (req, res) => {
                 }
             ]
         });
-        
+
         if (!project) {
             return res.status(404).json({ error: 'Project not found' });
         }
-        
+
         res.json(project);
     } catch (error) {
         console.error('Error fetching project:', error);
@@ -242,14 +230,14 @@ app.get('/api/projects/:id', requireAuth, async (req, res) => {
 app.post('/api/projects', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
     try {
         const { name, description, status = 'active' } = req.body;
-        
+
         const newProject = await Project.create({
             name,
             description,
             status,
             managerId: req.user.id
         });
-        
+
         res.status(201).json(newProject);
     } catch (error) {
         console.error('Error creating project:', error);
@@ -261,16 +249,16 @@ app.post('/api/projects', requireAuth, requireRole('Manager', 'Admin'), async (r
 app.put('/api/projects/:id', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
     try {
         const { name, description, status } = req.body;
-        
+
         const [updatedRowsCount] = await Project.update(
             { name, description, status },
             { where: { id: req.params.id } }
         );
-        
+
         if (updatedRowsCount === 0) {
             return res.status(404).json({ error: 'Project not found' });
         }
-        
+
         const updatedProject = await Project.findByPk(req.params.id);
         res.json(updatedProject);
     } catch (error) {
@@ -285,11 +273,11 @@ app.delete('/api/projects/:id', requireAuth, requireRole('Admin'), async (req, r
         const deletedRowsCount = await Project.destroy({
             where: { id: req.params.id }
         });
-        
+
         if (deletedRowsCount === 0) {
             return res.status(404).json({ error: 'Project not found' });
         }
-        
+
         res.json({ message: 'Project deleted successfully' });
     } catch (error) {
         console.error('Error deleting project:', error);
@@ -312,7 +300,7 @@ app.get('/api/projects/:id/tasks', requireAuth, async (req, res) => {
                 }
             ]
         });
-        
+
         res.json(tasks);
     } catch (error) {
         console.error('Error fetching tasks:', error);
@@ -324,7 +312,7 @@ app.get('/api/projects/:id/tasks', requireAuth, async (req, res) => {
 app.post('/api/projects/:id/tasks', requireAuth, requireRole('Manager', 'Admin'), async (req, res) => {
     try {
         const { title, description, assignedUserId, priority = 'medium' } = req.body;
-        
+
         const newTask = await Task.create({
             title,
             description,
@@ -333,7 +321,7 @@ app.post('/api/projects/:id/tasks', requireAuth, requireRole('Manager', 'Admin')
             priority,
             status: 'pending'
         });
-        
+
         res.status(201).json(newTask);
     } catch (error) {
         console.error('Error creating task:', error);
@@ -345,16 +333,16 @@ app.post('/api/projects/:id/tasks', requireAuth, requireRole('Manager', 'Admin')
 app.put('/api/tasks/:id', requireAuth, async (req, res) => {
     try {
         const { title, description, status, priority } = req.body;
-        
+
         const [updatedRowsCount] = await Task.update(
             { title, description, status, priority },
             { where: { id: req.params.id } }
         );
-        
+
         if (updatedRowsCount === 0) {
             return res.status(404).json({ error: 'Task not found' });
         }
-        
+
         const updatedTask = await Task.findByPk(req.params.id);
         res.json(updatedTask);
     } catch (error) {
@@ -369,11 +357,11 @@ app.delete('/api/tasks/:id', requireAuth, requireRole('Admin'), async (req, res)
         const deletedRowsCount = await Task.destroy({
             where: { id: req.params.id }
         });
-        
+
         if (deletedRowsCount === 0) {
             return res.status(404).json({ error: 'Task not found' });
         }
-        
+
         res.json({ message: 'Task deleted successfully' });
     } catch (error) {
         console.error('Error deleting task:', error);
@@ -381,7 +369,7 @@ app.delete('/api/tasks/:id', requireAuth, requireRole('Admin'), async (req, res)
     }
 });
 
-// Start server
+// START SERVER
 app.listen(PORT, () => {
     console.log(`Server running on port http://localhost:${PORT}`);
 });
