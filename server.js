@@ -102,11 +102,13 @@ app.post('/api/login', async (req, res) => {
         if (!isValidPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
-        
+
         // Create session (TODO: Replace with JWT)
+        
         req.session.userId = user.id;
         req.session.userName = user.name;
         req.session.userEmail = user.email;
+        req.session.userRole = user.role;
         
         res.json({
             message: 'Login successful',
